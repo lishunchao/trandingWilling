@@ -34,6 +34,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self._json(ADAPTER.snapshot())
         if url.path == "/api/v1/candles":
             return self._candles(urllib.parse.parse_qs(url.query))
+        if url.path == "/api/v1/marks":
+            return self._marks(urllib.parse.parse_qs(url.query))
         if url.path == "/api/v1/health":
             return self._json({"ok": True, "service": "qingyun-web-v1"})
         path = "index.html" if url.path in ("", "/") else url.path.lstrip("/")
@@ -66,6 +68,21 @@ class AppHandler(BaseHTTPRequestHandler):
             return self._json({"symbol": symbol, "interval": interval, "candles": candles})
         except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
             return self._json({"error": "market data temporarily unavailable", "detail": str(exc)}, 502)
+
+    def _marks(self, query):
+        requested = {x.upper() for x in query.get("symbols", [""])[0].split(",") if x}
+        if not requested or len(requested) > 60 or any(not x.endswith("USDT") or not x.replace("USDT", "").isalnum() for x in requested):
+            return self._json({"error": "invalid symbols"}, 400)
+        endpoint = "https://fapi.binance.com/fapi/v1/premiumIndex"
+        try:
+            request = urllib.request.Request(endpoint, headers={"User-Agent": "Trading-Console-V1/1.0"})
+            with urllib.request.urlopen(request, timeout=8) as response:
+                rows = json.loads(response.read().decode("utf-8"))
+            marks = {row["symbol"]: {"price": float(row["markPrice"]), "time": int(row["time"])}
+                     for row in rows if row.get("symbol") in requested}
+            return self._json({"source": "binance_usdt_perpetual_mark_price", "marks": marks})
+        except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            return self._json({"error": "mark prices temporarily unavailable", "detail": str(exc)}, 502)
 
     def log_message(self, fmt, *args):
         print("[web]", fmt % args)

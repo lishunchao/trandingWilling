@@ -4,6 +4,7 @@ const price = (n) => n == null ? "—" : Number(n).toLocaleString("en-US", {maxi
 let interval = "15m";
 let strategyFilter = "enhanced";
 let latestDashboard = null;
+let liveMarks = {};
 
 async function getJSON(url) {
   const response = await fetch(url, {cache: "no-store"});
@@ -52,12 +53,20 @@ function renderStrategyViews() {
 }
 
 function renderSignals(signals) {
-  $("signalsBody").innerHTML = signals.length ? signals.map(s => { const p=s.score_parts; const tip=`确认 ${p.confirmation}/30 · 盈亏比 ${p.reward_risk}/30 · 风控 ${p.risk_control}/30 · 成本 ${p.cost_integrity}/10`; return `<tr><td><div class="symbol-cell"><span class="grade ${s.grade.toLowerCase()}">${s.grade}</span>${s.symbol}</div></td><td><div class="score" title="${tip}"><strong>${s.score}</strong><span><i style="width:${s.score}%"></i></span></div></td><td class="${s.side === "做多" ? "long" : "short"}">${s.side}</td><td>${s.strategy === "enhanced" ? "增强版" : "基准版"}</td><td>${price(s.entry)}</td><td>${price(s.stop)}</td><td>${price(s.target)}</td><td class="rr">${s.reward_risk || "—"}R</td><td>${s.risk_pct == null ? "—" : (s.risk_pct * 100).toFixed(2) + "%"}</td></tr>`}).join("") : `<tr><td colspan="9" class="empty">当前没有新信号。系统保持静默，不构造机会。</td></tr>`;
+  $("signalsBody").innerHTML = signals.length ? signals.map(s => { const p=s.score_parts, mark=liveMarks[s.symbol]?.price, stopDistance=mark==null?null:Math.abs(mark-s.stop)/mark*100; const tip=`确认 ${p.confirmation}/30 · 盈亏比 ${p.reward_risk}/30 · 风控 ${p.risk_control}/30 · 成本 ${p.cost_integrity}/10`; return `<tr><td><div class="symbol-cell"><span class="grade ${s.grade.toLowerCase()}">${s.grade}</span>${s.symbol}</div></td><td><div class="score" title="${tip}"><strong>${s.score}</strong><span><i style="width:${s.score}%"></i></span></div></td><td class="${s.side === "做多" ? "long" : "short"}">${s.side}</td><td>${s.strategy === "enhanced" ? "增强版" : "基准版"}</td><td><b class="live-price">${price(mark)}</b><small class="sub-price">触发 ${price(s.entry)}</small></td><td>${price(s.stop)}<small class="sub-price">${stopDistance==null?"等待实时价":`距离 ${stopDistance.toFixed(2)}%`}</small></td><td>${price(s.target)}</td><td class="rr">${s.reward_risk || "—"}R</td><td>${s.risk_pct == null ? "—" : (s.risk_pct * 100).toFixed(2) + "%"}</td></tr>`}).join("") : `<tr><td colspan="9" class="empty">当前没有新信号。系统保持静默，不构造机会。</td></tr>`;
 }
 
 function renderPositions(positions) {
   $("positionBadge").textContent = positions.length;
-  $("positionList").innerHTML = positions.length ? positions.slice(0, 16).map(p => `<div class="position-row"><div><strong>${p.symbol}</strong><small>${p.strategy === "enhanced" ? "增强版" : "基准版"} · ${p.grade}级 · ${p.score}分</small></div><div class="${p.side === "做多" ? "long" : "short"}">${p.side}<small>${p.reward_risk || "—"}R</small></div><div><span class="price-path">入场 → 止损</span><small>${price(p.entry)} → ${price(p.stop)}</small></div><div><span class="price-path">目标</span><small>${price(p.target)}</small></div></div>`).join("") : `<p class="empty">当前没有纸面仓位。</p>`;
+  $("positionList").innerHTML = positions.length ? positions.slice(0, 16).map(p => {const mark=liveMarks[p.symbol]?.price, dist=mark==null?null:Math.abs(mark-p.stop)/mark*100;return `<div class="position-row"><div><strong>${p.symbol}</strong><small>${p.strategy === "enhanced" ? "增强版" : "基准版"} · ${p.grade}级 · ${p.score}分</small></div><div class="${p.side === "做多" ? "long" : "short"}">${p.side}<small>${p.reward_risk || "—"}R</small></div><div><span class="price-path">成交入场 / 实时</span><small>${price(p.entry)} / <b class="live-price">${price(mark)}</b></small></div><div><span class="price-path">结构止损 / 距离</span><small>${price(p.stop)} / ${dist==null?"—":dist.toFixed(2)+"%"}</small></div></div>`}).join("") : `<p class="empty">当前没有纸面仓位。</p>`;
+}
+
+async function loadMarks() {
+  if (!latestDashboard) return;
+  const symbols = [...new Set([...latestDashboard.signals, ...latestDashboard.positions].map(x => x.symbol))];
+  if (!symbols.length) return;
+  try { const data = await getJSON(`/api/v1/marks?symbols=${encodeURIComponent(symbols.slice(0,60).join(","))}`); liveMarks = data.marks || {}; renderStrategyViews(); }
+  catch { /* Keep last good exchange snapshot on transient errors. */ }
 }
 
 function renderTelegram(tg) {
@@ -100,4 +109,4 @@ document.querySelectorAll("[data-strategy]").forEach(b=>b.addEventListener("clic
 document.querySelectorAll(".intervals button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".intervals button").forEach(x=>x.classList.remove("active"));b.classList.add("active");interval=b.textContent;loadCandles()}));
 $("symbolPicker").addEventListener("change",loadCandles);
 addEventListener("resize",()=>loadCandles());
-loadDashboard(); loadCandles(); setInterval(loadDashboard,30000); setInterval(loadCandles,60000);
+loadDashboard().then(loadMarks); loadCandles(); setInterval(loadDashboard,30000); setInterval(loadCandles,60000); setInterval(loadMarks,5000);

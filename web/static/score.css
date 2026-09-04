@@ -86,3 +86,6 @@
   .signal-tools, .strategy-filter { width: 100%; }
   .strategy-filter button { flex: 1; }
 }
+
+.live-price { color: var(--mint); font-weight: 700; }
+.sub-price { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; white-space: nowrap; }

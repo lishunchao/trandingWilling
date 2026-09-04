@@ -1,0 +1,369 @@
+//@version=6
+indicator("青云操作系统 v2.1｜独立复刻版", shorttitle="青云 v2.1 Clean", overlay=true, max_labels_count=500, max_lines_count=200)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 独立实现说明
+// 依据用户提供的教学视频与规则手册重新实现，不含原作者私有源码。
+// 12/25 与 4H→15m 有明确视频证据；144/169 已由原指标当前可见面板确认。
+
+groupCore = "核心参数"
+fastLen = input.int(12, "短期快线 EMA", minval=2, group=groupCore)
+slowLen = input.int(25, "短期慢线 EMA", minval=3, group=groupCore)
+dominantTf = input.timeframe("240", "主导周期", group=groupCore, tooltip="视频常规规则：4小时确定方向")
+confirmOnClose = input.bool(true, "只在收盘确认信号", group=groupCore)
+confirmedDominant = input.bool(true, "主导周期只使用已收盘K线", group=groupCore, tooltip="开启后固定使用上一根已完成4小时K线，避免4小时方向在盘中变化")
+
+groupVegas = "Vegas 长周期带（参数可调）"
+showVegas = input.bool(true, "显示 Vegas 带", group=groupVegas)
+vegasFastLen = input.int(144, "Vegas 快线", minval=20, group=groupVegas, tooltip="已由原指标可见面板 EMA144/169 确认")
+vegasSlowLen = input.int(169, "Vegas 慢线", minval=21, group=groupVegas, tooltip="已由原指标可见面板 EMA144/169 确认")
+
+groupFilter = "结构与过滤"
+structureLen = input.int(12, "结构窗口", minval=5, maxval=50, group=groupFilter)
+crossLookback = input.int(12, "穿插统计窗口", minval=5, maxval=50, group=groupFilter)
+maxCrosses = input.int(4, "最多允许穿插次数", minval=1, maxval=12, group=groupFilter)
+minBandGapPct = input.float(0.08, "最小均线带宽度 (%)", minval=0.01, step=0.01, group=groupFilter)
+touchTolerancePct = input.float(0.30, "触线容差 (%)", minval=0.05, step=0.05, group=groupFilter)
+signalSpacing = input.int(8, "同方向信号最小间隔 K 数", minval=1, maxval=100, group=groupFilter)
+requireVolume = input.bool(false, "要求成交量不低于20期均量", group=groupFilter)
+outcomeHorizon = input.int(20, "触碰成熟评估 K 数", minval=8, maxval=80, group=groupFilter, tooltip="触碰后经过此数量K线，才计入胜率与顺逆势波动，避免未成熟样本污染统计")
+shortStopAtr = input.float(0.35, "短期结构止损 ATR 缓冲", minval=0.10, maxval=1.00, step=0.05, group=groupFilter)
+vegasStopAtr = input.float(0.50, "长期结构止损 ATR 缓冲", minval=0.15, maxval=1.50, step=0.05, group=groupFilter)
+
+groupDisplay = "显示与提醒"
+showShortBand = input.bool(true, "显示 EMA12/25 带", group=groupDisplay)
+showTests = input.bool(true, "显示首次测试", group=groupDisplay)
+showStops = input.bool(true, "显示建议止损参考", group=groupDisplay)
+showDashboard = input.bool(true, "显示状态面板", group=groupDisplay)
+labelOffsetAtr = input.float(0.20, "标签离开K线距离（ATR）", minval=0.05, maxval=1.00, step=0.05, group=groupDisplay, tooltip="默认按A版紧凑高度布置；相邻标签仍会自动分层，避免遮挡K线")
+
+f_cross_count(src, avg, length) =>
+    int count = 0
+    for i = 0 to length - 1
+        bool crossed = (src[i] - avg[i]) * (src[i + 1] - avg[i + 1]) < 0
+        count += crossed ? 1 : 0
+    count
+
+f_dir(_fastLen, _slowLen, _structureLen, _crossLen, _maxCrosses, _minGap) =>
+    float ef = ta.ema(close, _fastLen)
+    float es = ta.ema(close, _slowLen)
+    float gap = math.abs(ef - es) / close * 100
+    int crosses = f_cross_count(close, ef, _crossLen)
+    float recentHigh = ta.highest(high, _structureLen)
+    float olderHigh = ta.highest(high[_structureLen], _structureLen)
+    float recentLow = ta.lowest(low, _structureLen)
+    float olderLow = ta.lowest(low[_structureLen], _structureLen)
+    bool longOk = close > ef and ef > es and ef > ef[3] and es > es[3] and recentHigh > olderHigh and recentLow >= olderLow
+    bool shortOk = close < ef and ef < es and ef < ef[3] and es < es[3] and recentHigh <= olderHigh and recentLow < olderLow
+    crosses > _maxCrosses or gap < _minGap ? 0 : longOk ? 1 : shortOk ? -1 : 0
+
+emaFast = ta.ema(close, fastLen)
+emaSlow = ta.ema(close, slowLen)
+vegasFast = ta.ema(close, vegasFastLen)
+vegasSlow = ta.ema(close, vegasSlowLen)
+
+shortTop = math.max(emaFast, emaSlow)
+shortBottom = math.min(emaFast, emaSlow)
+vegasTop = math.max(vegasFast, vegasSlow)
+vegasBottom = math.min(vegasFast, vegasSlow)
+
+dominantDirLive = request.security(syminfo.tickerid, dominantTf,
+     f_dir(fastLen, slowLen, structureLen, crossLookback, maxCrosses, minBandGapPct),
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_off)
+dominantDirConfirmed = request.security(syminfo.tickerid, dominantTf,
+     f_dir(fastLen, slowLen, structureLen, crossLookback, maxCrosses, minBandGapPct)[1],
+     gaps=barmerge.gaps_off, lookahead=barmerge.lookahead_on)
+dominantDir = confirmedDominant ? dominantDirConfirmed : dominantDirLive
+
+localCrosses = f_cross_count(close, emaFast, crossLookback)
+localGapPct = math.abs(emaFast - emaSlow) / close * 100
+tangled = localCrosses > maxCrosses or localGapPct < minBandGapPct
+localLong = close > emaFast and emaFast > emaSlow and emaFast > emaFast[3] and emaSlow > emaSlow[3]
+localShort = close < emaFast and emaFast < emaSlow and emaFast < emaFast[3] and emaSlow < emaSlow[3]
+
+tol = touchTolerancePct / 100
+inShortBand = low <= shortTop * (1 + tol) and high >= shortBottom * (1 - tol)
+inVegasBand = low <= vegasTop * (1 + tol) and high >= vegasBottom * (1 - tol)
+newShortTouch = inShortBand and not inShortBand[1]
+newVegasTouch = inVegasBand and not inVegasBand[1]
+
+volOk = not requireVolume or volume >= ta.sma(volume, 20)
+barOk = not confirmOnClose or barstate.isconfirmed
+bullConfirm = close > open and close > high[1]
+bearConfirm = close < open and close < low[1]
+recentShortTouch = ta.barssince(newShortTouch) <= 4
+recentVegasTouch = ta.barssince(newVegasTouch) <= 6
+
+priorHigh = ta.highest(high[1], 20)
+priorLow = ta.lowest(low[1], 20)
+structureAdvanceLong = close > priorHigh or ta.highest(high, structureLen) > ta.highest(high[structureLen], structureLen)
+structureAdvanceShort = close < priorLow or ta.lowest(low, structureLen) < ta.lowest(low[structureLen], structureLen)
+atr = ta.atr(14)
+
+var int shortTouchLongCount = 0
+var int shortTouchShortCount = 0
+var int vegasTouchLongCount = 0
+var int vegasTouchShortCount = 0
+var int previousDominantDir = 0
+var int lastLongSignalBar = na
+var int lastShortSignalBar = na
+var int shortMatureCount = 0
+var int shortWinCount = 0
+var float shortFavAtrSum = 0.0
+var float shortAdvAtrSum = 0.0
+var int vegasMatureCount = 0
+var int vegasWinCount = 0
+var float vegasFavAtrSum = 0.0
+var float vegasAdvAtrSum = 0.0
+var int regimeBarCount = 0
+var int shortSupportBarCount = 0
+var int vegasSupportBarCount = 0
+var int regimeEpoch = 0
+
+if dominantDir != previousDominantDir
+    regimeEpoch += 1
+    shortTouchLongCount := 0
+    shortTouchShortCount := 0
+    vegasTouchLongCount := 0
+    vegasTouchShortCount := 0
+    shortMatureCount := 0
+    shortWinCount := 0
+    shortFavAtrSum := 0.0
+    shortAdvAtrSum := 0.0
+    vegasMatureCount := 0
+    vegasWinCount := 0
+    vegasFavAtrSum := 0.0
+    vegasAdvAtrSum := 0.0
+    regimeBarCount := 0
+    shortSupportBarCount := 0
+    vegasSupportBarCount := 0
+    lastLongSignalBar := na
+    lastShortSignalBar := na
+    previousDominantDir := dominantDir
+
+if dominantDir != 0
+    regimeBarCount += 1
+    bool shortBandHeld = dominantDir == 1 ? close >= shortBottom : close <= shortTop
+    bool vegasBandHeld = dominantDir == 1 ? close >= vegasBottom : close <= vegasTop
+    shortSupportBarCount += shortBandHeld ? 1 : 0
+    vegasSupportBarCount += vegasBandHeld ? 1 : 0
+
+if newShortTouch and dominantDir == 1
+    shortTouchLongCount += 1
+if newShortTouch and dominantDir == -1
+    shortTouchShortCount += 1
+if newVegasTouch and dominantDir == 1
+    vegasTouchLongCount += 1
+if newVegasTouch and dominantDir == -1
+    vegasTouchShortCount += 1
+
+// 成熟触碰统计：仅在结果窗口完整结束后结算，当前K线不会改写旧样本。
+// 必须是同一个连续趋势阶段，不能只比较窗口两端方向；这样可避免
+// 多→空→多等快速翻转后，把旧阶段触碰延迟计入新阶段统计。
+sameMatureRegime = dominantDir != 0 and regimeEpoch[outcomeHorizon] == regimeEpoch
+shortMatureLong = sameMatureRegime and newShortTouch[outcomeHorizon] and dominantDir == 1
+shortMatureShort = sameMatureRegime and newShortTouch[outcomeHorizon] and dominantDir == -1
+vegasMatureLong = sameMatureRegime and newVegasTouch[outcomeHorizon] and dominantDir == 1
+vegasMatureShort = sameMatureRegime and newVegasTouch[outcomeHorizon] and dominantDir == -1
+pastClose = close[outcomeHorizon]
+pastAtr = atr[outcomeHorizon]
+windowHigh = ta.highest(high, outcomeHorizon)
+windowLow = ta.lowest(low, outcomeHorizon)
+
+if (shortMatureLong or shortMatureShort) and not na(pastAtr) and pastAtr > 0
+    float fav = shortMatureLong ? (windowHigh - pastClose) / pastAtr : (pastClose - windowLow) / pastAtr
+    float adv = shortMatureLong ? (pastClose - windowLow) / pastAtr : (windowHigh - pastClose) / pastAtr
+    shortMatureCount += 1
+    shortFavAtrSum += math.max(fav, 0)
+    shortAdvAtrSum += math.max(adv, 0)
+    shortWinCount += fav > adv ? 1 : 0
+
+if (vegasMatureLong or vegasMatureShort) and not na(pastAtr) and pastAtr > 0
+    float fav = vegasMatureLong ? (windowHigh - pastClose) / pastAtr : (pastClose - windowLow) / pastAtr
+    float adv = vegasMatureLong ? (pastClose - windowLow) / pastAtr : (windowHigh - pastClose) / pastAtr
+    vegasMatureCount += 1
+    vegasFavAtrSum += math.max(fav, 0)
+    vegasAdvAtrSum += math.max(adv, 0)
+    vegasWinCount += fav > adv ? 1 : 0
+
+spacingLongOk = na(lastLongSignalBar) or bar_index - lastLongSignalBar >= signalSpacing
+spacingShortOk = na(lastShortSignalBar) or bar_index - lastShortSignalBar >= signalSpacing
+
+shortLongSignal = barOk and dominantDir == 1 and localLong and not tangled and recentShortTouch and bullConfirm and volOk and shortTouchLongCount >= 2 and spacingLongOk
+shortShortSignal = barOk and dominantDir == -1 and localShort and not tangled and recentShortTouch and bearConfirm and volOk and shortTouchShortCount >= 2 and spacingShortOk
+vegasLongSignal = barOk and showVegas and dominantDir == 1 and not tangled and recentVegasTouch and bullConfirm and volOk and vegasTouchLongCount >= 2 and spacingLongOk
+vegasShortSignal = barOk and showVegas and dominantDir == -1 and not tangled and recentVegasTouch and bearConfirm and volOk and vegasTouchShortCount >= 2 and spacingShortOk
+
+longSignal = shortLongSignal or vegasLongSignal
+shortSignal = shortShortSignal or vegasShortSignal
+longAdd = longSignal and structureAdvanceLong and not na(lastLongSignalBar)
+shortAdd = shortSignal and structureAdvanceShort and not na(lastShortSignalBar)
+
+// 视频规则：止损放在本次交易所依赖的均线/结构失效位外侧；不用固定百分比。
+// 短期带容错较窄，Vegas/长期带允许更深回踩或反抽。
+shortBandLongStop = math.min(ta.lowest(low, structureLen), shortBottom) - atr * shortStopAtr
+shortBandShortStop = math.max(ta.highest(high, structureLen), shortTop) + atr * shortStopAtr
+vegasLongStop = math.min(ta.lowest(low, structureLen * 2), vegasBottom) - atr * vegasStopAtr
+vegasShortStop = math.max(ta.highest(high, structureLen * 2), vegasTop) + atr * vegasStopAtr
+longStop = vegasLongSignal ? vegasLongStop : shortBandLongStop
+shortStop = vegasShortSignal ? vegasShortStop : shortBandShortStop
+
+var float lastSuggestedStop = na
+var string lastStopBasis = "等待有效信号"
+var float lastAddPrice = na
+var string lastAddBasis = "等待新结构推进"
+
+if longSignal
+    string kind = longAdd ? "加仓候选" : "入场候选"
+    int signalNo = vegasLongSignal ? vegasTouchLongCount : shortTouchLongCount
+    string family = (vegasLongSignal ? "长买" : "短买") + str.tostring(math.max(signalNo, 1))
+    // 标签放在最近局部低点之外，并按触碰编号分层，避免覆盖K线与相邻标签。
+    float labelTier = (math.max(signalNo, 1) - 1) % 3
+    float labelY = ta.lowest(low, 3) - atr * (labelOffsetAtr + labelTier * 0.10)
+    label.new(bar_index, labelY, family + "｜" + kind + (showStops ? "\n止损 " + str.tostring(longStop, format.mintick) : ""),
+      style=label.style_label_up, color=longAdd ? color.rgb(0, 125, 80) : color.rgb(0, 170, 105), textcolor=color.white, size=size.small)
+    if showStops
+        line.new(bar_index, longStop, bar_index + 8, longStop, color=color.new(color.red, 15), style=line.style_dashed)
+    lastSuggestedStop := longStop
+    lastStopBasis := vegasLongSignal ? "144/169下方结构失效" : "12/25下方结构失效"
+    if longAdd
+        lastAddPrice := close
+        lastAddBasis := vegasLongSignal ? "新高后回踩144/169" : "新高后回踩12/25"
+    lastLongSignalBar := bar_index
+    alert('{"system":"Qingyun Clean v2.1","symbol":"' + syminfo.ticker + '","side":"LONG","kind":"' + kind + '","trigger":' + str.tostring(close) + ',"add_price":' + (longAdd ? str.tostring(close) : 'null') + ',"suggested_stop":' + str.tostring(longStop) + ',"stop_basis":"' + lastStopBasis + '"}', alert.freq_once_per_bar_close)
+
+if shortSignal
+    string kind = shortAdd ? "加仓候选" : "入场候选"
+    int signalNo = vegasShortSignal ? vegasTouchShortCount : shortTouchShortCount
+    string family = (vegasShortSignal ? "长卖" : "短卖") + str.tostring(math.max(signalNo, 1))
+    // 标签放在最近局部高点之外，并按触碰编号分层，避免覆盖K线与相邻标签。
+    float labelTier = (math.max(signalNo, 1) - 1) % 3
+    float labelY = ta.highest(high, 3) + atr * (labelOffsetAtr + labelTier * 0.10)
+    label.new(bar_index, labelY, family + "｜" + kind + (showStops ? "\n止损 " + str.tostring(shortStop, format.mintick) : ""),
+      style=label.style_label_down, color=shortAdd ? color.rgb(150, 25, 50) : color.rgb(210, 45, 65), textcolor=color.white, size=size.small)
+    if showStops
+        line.new(bar_index, shortStop, bar_index + 8, shortStop, color=color.new(color.red, 15), style=line.style_dashed)
+    lastSuggestedStop := shortStop
+    lastStopBasis := vegasShortSignal ? "144/169上方结构失效" : "12/25上方结构失效"
+    if shortAdd
+        lastAddPrice := close
+        lastAddBasis := vegasShortSignal ? "新低后反抽144/169" : "新低后反抽12/25"
+    lastShortSignalBar := bar_index
+    alert('{"system":"Qingyun Clean v2.1","symbol":"' + syminfo.ticker + '","side":"SHORT","kind":"' + kind + '","trigger":' + str.tostring(close) + ',"add_price":' + (shortAdd ? str.tostring(close) : 'null') + ',"suggested_stop":' + str.tostring(shortStop) + ',"stop_basis":"' + lastStopBasis + '"}', alert.freq_once_per_bar_close)
+
+shortTestLong = showTests and barOk and dominantDir == 1 and newShortTouch and shortTouchLongCount == 1
+shortTestShort = showTests and barOk and dominantDir == -1 and newShortTouch and shortTouchShortCount == 1
+vegasTestLong = showTests and showVegas and barOk and dominantDir == 1 and newVegasTouch and vegasTouchLongCount == 1
+vegasTestShort = showTests and showVegas and barOk and dominantDir == -1 and newVegasTouch and vegasTouchShortCount == 1
+
+plotshape(shortTestLong, title="短多测试", text="短测", style=shape.labelup, location=location.belowbar, color=color.new(color.teal, 35), textcolor=color.white, size=size.tiny)
+plotshape(shortTestShort, title="短空测试", text="短测", style=shape.labeldown, location=location.abovebar, color=color.new(color.orange, 30), textcolor=color.white, size=size.tiny)
+plotshape(vegasTestLong, title="长多测试", text="长测试", style=shape.labelup, location=location.belowbar, color=color.new(color.blue, 35), textcolor=color.white, size=size.tiny)
+plotshape(vegasTestShort, title="长空测试", text="长测试", style=shape.labeldown, location=location.abovebar, color=color.new(color.purple, 30), textcolor=color.white, size=size.tiny)
+
+pFast = plot(showShortBand ? emaFast : na, "EMA 快线", color=color.rgb(45, 135, 255), linewidth=2)
+pSlow = plot(showShortBand ? emaSlow : na, "EMA 慢线", color=color.rgb(95, 75, 225), linewidth=2)
+fill(pFast, pSlow, color=emaFast >= emaSlow ? color.new(color.blue, 87) : color.new(color.purple, 87), title="短期均线带")
+pVegasFast = plot(showVegas ? vegasFast : na, "Vegas 快线", color=color.rgb(245, 170, 35), linewidth=1)
+pVegasSlow = plot(showVegas ? vegasSlow : na, "Vegas 慢线", color=color.rgb(230, 95, 35), linewidth=1)
+fill(pVegasFast, pVegasSlow, color=vegasFast >= vegasSlow ? color.new(color.orange, 88) : color.new(color.red, 90), title="Vegas 带")
+
+bgcolor(tangled ? color.new(color.gray, 92) : dominantDir == 1 ? color.new(color.green, 96) : dominantDir == -1 ? color.new(color.red, 96) : na, title="状态背景")
+
+alertcondition(longSignal, "青云做多候选", "青云 v2.1 独立版出现做多候选；请查看图表中的触发价与止损参考")
+alertcondition(shortSignal, "青云做空候选", "青云 v2.1 独立版出现做空候选；请查看图表中的触发价与止损参考")
+alertcondition(longAdd or shortAdd, "青云加仓候选", "青云 v2.1 独立版出现新的结构推进与回踩加仓候选")
+
+shortAvgFav = shortMatureCount > 0 ? shortFavAtrSum / shortMatureCount : na
+shortAvgAdv = shortMatureCount > 0 ? shortAdvAtrSum / shortMatureCount : na
+shortWinRate = shortMatureCount > 0 ? shortWinCount * 100.0 / shortMatureCount : na
+shortReactionRR = not na(shortAvgAdv) and shortAvgAdv > 0 ? shortAvgFav / shortAvgAdv : na
+shortSupportRate = regimeBarCount > 0 ? shortSupportBarCount * 100.0 / regimeBarCount : na
+shortDistanceAtr = atr > 0 ? math.abs(close - (emaFast + emaSlow) / 2) / atr : na
+shortSlopeAtr = atr > 0 ? (emaSlow - emaSlow[5]) / atr : na
+shortScore = math.min(100.0, math.max(0.0,
+     (not tangled ? 20 : 0) + (dominantDir != 0 ? 20 : 0) +
+     (shortReactionRR >= 1 ? 20 : nz(shortReactionRR) * 20) +
+     (not na(shortWinRate) ? shortWinRate * 0.2 : 0) +
+     (not na(shortSupportRate) ? shortSupportRate * 0.1 : 0) +
+     (math.abs(shortSlopeAtr) >= 0.20 ? 10 : math.abs(nz(shortSlopeAtr)) * 50)))
+
+vegasAvgFav = vegasMatureCount > 0 ? vegasFavAtrSum / vegasMatureCount : na
+vegasAvgAdv = vegasMatureCount > 0 ? vegasAdvAtrSum / vegasMatureCount : na
+vegasWinRate = vegasMatureCount > 0 ? vegasWinCount * 100.0 / vegasMatureCount : na
+vegasReactionRR = not na(vegasAvgAdv) and vegasAvgAdv > 0 ? vegasAvgFav / vegasAvgAdv : na
+vegasSupportRate = regimeBarCount > 0 ? vegasSupportBarCount * 100.0 / regimeBarCount : na
+vegasDistanceAtr = atr > 0 ? math.abs(close - (vegasFast + vegasSlow) / 2) / atr : na
+vegasSlopeAtr = atr > 0 ? (vegasSlow - vegasSlow[5]) / atr : na
+vegasAligned = dominantDir == 1 ? vegasFast > vegasSlow : dominantDir == -1 ? vegasFast < vegasSlow : false
+vegasScore = math.min(100.0, math.max(0.0,
+     (vegasAligned ? 25 : 0) + (dominantDir != 0 ? 20 : 0) +
+     (vegasReactionRR >= 1 ? 20 : nz(vegasReactionRR) * 20) +
+     (not na(vegasWinRate) ? vegasWinRate * 0.15 : 0) +
+     (not na(vegasSupportRate) ? vegasSupportRate * 0.1 : 0) +
+     (math.abs(vegasSlopeAtr) >= 0.15 ? 10 : math.abs(nz(vegasSlopeAtr)) * 66.67)))
+
+f_status(_count, _score, _dir) =>
+    _count < 5 ? "样本不足" : _score >= 70 ? (_dir == 1 ? "买入高有效" : _dir == -1 ? "卖出高有效" : "观察") : _score >= 50 ? "测试中" : "未激活"
+
+f_num(_value, _suffix) =>
+    na(_value) ? "无样本" : str.tostring(_value, "#.##") + _suffix
+
+// 统计与执行信息合并为一个面板；增强版增加行情趋势列并放大一级字号。
+var table dash = table.new(position.top_right, 5, 16, border_width=1)
+if barstate.isfirst
+    table.merge_cells(dash, 0, 11, 2, 11)
+    table.merge_cells(dash, 0, 12, 1, 12)
+    table.merge_cells(dash, 2, 12, 3, 12)
+    table.merge_cells(dash, 0, 13, 1, 13)
+    table.merge_cells(dash, 2, 13, 3, 13)
+    table.merge_cells(dash, 0, 14, 1, 14)
+    table.merge_cells(dash, 2, 14, 3, 14)
+    table.merge_cells(dash, 0, 15, 1, 15)
+    table.merge_cells(dash, 2, 15, 3, 15)
+if showDashboard and barstate.islast
+    color header = color.rgb(68, 73, 83)
+    color body = color.new(color.rgb(115, 120, 128), 18)
+    color good = color.rgb(55, 165, 85)
+    string vegasStatus = f_status(vegasMatureCount, vegasScore, dominantDir)
+    string shortStatus = f_status(shortMatureCount, shortScore, dominantDir)
+    string dominantTrend = dominantDir == 1 ? "4H多头" : dominantDir == -1 ? "4H空头" : "4H观察"
+    string localTrend = localLong ? "本级多头" : localShort ? "本级空头" : "本级震荡"
+    string shortBandTrend = emaFast > emaSlow ? "短带向上" : emaFast < emaSlow ? "短带向下" : "短带走平"
+    string vegasBandTrend = vegasFast > vegasSlow ? "长带向上" : vegasFast < vegasSlow ? "长带向下" : "长带走平"
+    string priceLocation = close > math.max(emaFast, vegasFast) ? "价格在线上" : close < math.min(emaSlow, vegasSlow) ? "价格在线下" : "价格带内"
+    string structureTrend = structureAdvanceLong ? "结构新高" : structureAdvanceShort ? "结构新低" : "结构整理"
+    string signalTrend = longAdd ? "多头加仓" : shortAdd ? "空头加仓" : longSignal ? "多头入场" : shortSignal ? "空头入场" : "等待信号"
+    string confirmTrend = barstate.isconfirmed ? "收盘确认" : "尚未收盘"
+    table.cell(dash, 0, 0, "EMA144/169", bgcolor=header, text_color=color.white, text_size=size.small)
+    table.cell(dash, 1, 0, vegasStatus, bgcolor=vegasStatus == "样本不足" ? body : good, text_color=color.white, text_size=size.small)
+    table.cell(dash, 2, 0, "EMA12/25", bgcolor=header, text_color=color.white, text_size=size.small)
+    table.cell(dash, 3, 0, shortStatus, bgcolor=shortStatus == "样本不足" ? body : good, text_color=color.white, text_size=size.small)
+    table.cell(dash, 4, 0, "行情趋势", bgcolor=header, text_color=color.white, text_size=size.small)
+    string[] fields = array.from("评分", "触碰胜率", "成熟触碰次数", "平均顺势波动", "平均不利波动", "反应盈亏比", "支撑率", "当前ATR", "均线距离", "均线斜率")
+    string[] vegasValues = array.from(str.tostring(math.round(vegasScore)) + "/100", f_num(vegasWinRate, "%"), str.tostring(vegasMatureCount), f_num(vegasAvgFav, " ATR"), f_num(vegasAvgAdv, " ATR"), f_num(vegasReactionRR, ""), f_num(vegasSupportRate, "%"), str.tostring(atr, format.mintick), f_num(vegasDistanceAtr, " ATR"), f_num(vegasSlopeAtr, " ATR"))
+    string[] shortValues = array.from(str.tostring(math.round(shortScore)) + "/100", f_num(shortWinRate, "%"), str.tostring(shortMatureCount), f_num(shortAvgFav, " ATR"), f_num(shortAvgAdv, " ATR"), f_num(shortReactionRR, ""), f_num(shortSupportRate, "%"), str.tostring(atr, format.mintick), f_num(shortDistanceAtr, " ATR"), f_num(shortSlopeAtr, " ATR"))
+    string[] trendValues = array.from(dominantTrend, localTrend, shortBandTrend, vegasBandTrend, priceLocation, structureTrend, signalTrend, str.tostring(atr / close * 100, "#.##") + "% ATR", tangled ? "均线缠绕" : "均线展开", confirmTrend)
+    for row = 0 to 9
+        table.cell(dash, 0, row + 1, array.get(fields, row), bgcolor=body, text_color=color.white, text_size=size.small)
+        table.cell(dash, 1, row + 1, array.get(vegasValues, row), bgcolor=body, text_color=color.white, text_size=size.small)
+        table.cell(dash, 2, row + 1, array.get(fields, row), bgcolor=body, text_color=color.white, text_size=size.small)
+        table.cell(dash, 3, row + 1, array.get(shortValues, row), bgcolor=body, text_color=color.white, text_size=size.small)
+        table.cell(dash, 4, row + 1, array.get(trendValues, row), bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 11, "当前执行参考", bgcolor=header, text_color=color.white, text_size=size.small)
+    table.cell(dash, 3, 11, dominantTrend, bgcolor=header, text_color=color.white, text_size=size.small)
+    table.cell(dash, 4, 11, signalTrend, bgcolor=header, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 12, "建议止损位", bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 2, 12, na(lastSuggestedStop) ? "待有效信号" : str.tostring(lastSuggestedStop, format.mintick), bgcolor=body, text_color=color.red, text_size=size.small)
+    table.cell(dash, 4, 12, dominantTrend, bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 13, "止损依据", bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 2, 13, lastStopBasis, bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 4, 13, priceLocation, bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 14, "建议加仓位", bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 2, 14, na(lastAddPrice) ? "等待新机会" : str.tostring(lastAddPrice, format.mintick), bgcolor=body, text_color=color.rgb(0, 210, 130), text_size=size.small)
+    table.cell(dash, 4, 14, structureTrend, bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 0, 15, "加仓依据", bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 2, 15, lastAddBasis, bgcolor=body, text_color=color.white, text_size=size.small)
+    table.cell(dash, 4, 15, confirmTrend, bgcolor=body, text_color=color.white, text_size=size.small)
+else if barstate.islast
+    table.clear(dash, 0, 0, 4, 15)

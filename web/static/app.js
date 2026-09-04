@@ -71,9 +71,26 @@ async function loadMarks() {
 }
 
 async function loadDynamicStops() {
-  if (!latestDashboard) return;
-  try { const data = await getJSON("/api/v1/dynamic-stops"); dynamicStops = data.stops || {}; renderStrategyViews(); }
-  catch { /* Keep the last completed-structure stop on transient errors. */ }
+  if (!latestDashboard) return false;
+  try { const data = await getJSON("/api/v1/dynamic-stops"); dynamicStops = data.stops || {}; renderStrategyViews(); return true; }
+  catch { return false; /* Keep the last completed-structure stop on transient errors. */ }
+}
+
+function scheduleNextDynamicStopRefresh() {
+  const now = Date.now();
+  const fifteenMinutes = 15 * 60 * 1000;
+  const closeConfirmationDelay = 7 * 1000;
+  const nextClose = (Math.floor(now / fifteenMinutes) + 1) * fifteenMinutes;
+  setTimeout(() => refreshDynamicStopsWithRetry(0), nextClose + closeConfirmationDelay - now);
+}
+
+async function refreshDynamicStopsWithRetry(attempt) {
+  const succeeded = await loadDynamicStops();
+  if (!succeeded && attempt < 2) {
+    setTimeout(() => refreshDynamicStopsWithRetry(attempt + 1), 15000);
+    return;
+  }
+  scheduleNextDynamicStopRefresh();
 }
 
 function renderTelegram(tg) {
@@ -116,4 +133,4 @@ document.querySelectorAll("[data-strategy]").forEach(b=>b.addEventListener("clic
 document.querySelectorAll(".intervals button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".intervals button").forEach(x=>x.classList.remove("active"));b.classList.add("active");interval=b.textContent;loadCandles()}));
 $("symbolPicker").addEventListener("change",loadCandles);
 addEventListener("resize",()=>loadCandles());
-loadDashboard().then(()=>Promise.all([loadMarks(),loadDynamicStops()])); loadCandles(); setInterval(loadDashboard,30000); setInterval(loadCandles,60000); setInterval(loadMarks,5000); setInterval(loadDynamicStops,30000);
+loadDashboard().then(()=>{ loadMarks(); refreshDynamicStopsWithRetry(0); }); loadCandles(); setInterval(loadDashboard,30000); setInterval(loadCandles,60000); setInterval(loadMarks,5000);

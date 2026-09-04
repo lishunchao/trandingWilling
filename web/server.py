@@ -72,12 +72,12 @@ class AppHandler(BaseHTTPRequestHandler):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="青云 Web V1 本地控制台")
+    parser = argparse.ArgumentParser(description="Web V1 本地交易控制台")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), AppHandler)
-    print(f"青云 Web V1：http://{args.host}:{args.port}")
+    print(f"Web V1：http://{args.host}:{args.port}")
     server.serve_forever()
 
 

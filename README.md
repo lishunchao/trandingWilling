@@ -40,6 +40,26 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 TradingView 脚本位于 `tradingview/青云操作系统v2.1_独立复刻版.pine`。它是独立复刻与研究版本，上线前仍应在 TradingView 中完成编译、回放与原版信号对照。
 
+## Web V1 本地交易控制台
+
+Web V1 直接读取现有纸面跟踪器的 `outputs/paper_tracker_status.json`，不会复制策略状态，也不会连接交易账户。先启动纸面跟踪器，再另开一个 PowerShell 窗口运行：
+
+```powershell
+.\start_web.ps1
+```
+
+浏览器访问 `http://127.0.0.1:8765`。控制台包含 Dashboard、Binance 公开 K 线、A/B/C 信号等级、入场/止损/止盈与盈亏比、纸面仓位、Telegram 状态和策略运行状态。
+
+页面与接口均在本仓库的 `web/` 目录。后端使用 Python 标准库，不增加常驻依赖；主要只读接口为：
+
+- `GET /api/v1/dashboard`：现有跟踪器状态的统一视图模型。
+- `GET /api/v1/candles?symbol=BTCUSDT&interval=15m`：公开 Binance K 线代理。
+- `GET /api/v1/health`：本地服务健康状态。
+
+策略适配集中在 `web/adapters.py`。EMA12/25 已标记为运行模块；箱体突破、宏观/国际事件风险、多策略 Alpha、回测分析及统一评分与风控采用稳定模块标识预留接口，后续接入时无需重写页面结构。
+
+信号等级是 V1 的展示规则，不会反向修改原策略：增强版且风险距离不超过 3%、盈亏比至少 2R 为 A；满足至少 2R 且风险距离不超过 6% 为 B；其余为 C 级观察。正式推广前必须通过足量历史、样本外和稳定性验证。
+
 ## 配置
 
 策略参数位于 `config/trading_scanner_config.json`。默认只使用公开市场数据，通知开关固定关闭。`.env.example` 只是安全边界说明，不需要填写任何密钥。

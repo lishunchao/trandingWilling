@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="青云交易研究系统本地实盘控制台 V1">
+  <title>青云 · 交易控制台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="mark">青</span><div><strong>青云控制台</strong><small>RESEARCH TERMINAL · V1</small></div></div>
+    <nav><button class="nav-active">总览</button><button data-scroll="signals">信号</button><button data-scroll="positions">纸面仓位</button><button data-scroll="modules">策略模块</button></nav>
+    <div class="status-pill"><i id="statusDot"></i><span id="systemStatus">正在连接</span></div>
+  </header>
+
+  <main>
+    <section class="headline">
+      <div><p class="eyebrow">MARKET PULSE / 市场脉搏</p><h1>先看风险，再看机会。</h1><p id="scanTime" class="muted">等待纸面跟踪器状态…</p></div>
+      <div class="market-picker"><label>合约</label><select id="symbolPicker"><option>BTCUSDT</option><option>ETHUSDT</option><option>BNBUSDT</option><option>SOLUSDT</option></select><div class="intervals"><button>5m</button><button class="active">15m</button><button>1h</button><button>4h</button></div></div>
+    </section>
+
+    <section class="metrics" aria-label="核心指标">
+      <article><span>扫描合约</span><strong id="universe">—</strong><small id="directions">— 个趋势方向</small></article>
+      <article><span>当前信号</span><strong id="signalCount">—</strong><small>A / B / C 分级</small></article>
+      <article><span>纸面仓位</span><strong id="positionCount">—</strong><small>非真实账户持仓</small></article>
+      <article><span>长期期望值</span><strong id="expectancy">—</strong><small id="sampleSize">扣除成本 · 等待样本</small></article>
+      <article><span>历史胜率</span><strong id="winRate">—</strong><small>辅助指标，非优化目标</small></article>
+    </section>
+
+    <section class="grid-main">
+      <article class="panel chart-panel">
+        <header><div><h2 id="chartTitle">BTCUSDT</h2><p>Binance USDT 永续 · 公开行情</p></div><div id="lastPrice" class="last-price">—</div></header>
+        <div id="chartWrap" class="chart-wrap"><canvas id="chart"></canvas><div id="chartMessage" class="chart-message">正在载入行情…</div></div>
+        <footer><span><i class="legend up"></i>上涨</span><span><i class="legend down"></i>下跌</span><span>价格仅供研究</span></footer>
+      </article>
+
+      <aside class="panel risk-panel">
+        <div class="panel-kicker">RISK FIRST</div><h2>决策闸门</h2>
+        <div class="risk-score"><div><span>最低目标盈亏比</span><strong>2.0R</strong></div><div class="ring"><span>R</span></div></div>
+        <ul class="gate-list"><li><i class="ok">✓</i><span>结构止损</span><b>已启用</b></li><li><i class="ok">✓</i><span>手续费与滑点</span><b>已计入</b></li><li><i class="wait">·</i><span>宏观事件风险</span><b>待接入</b></li><li><i class="wait">·</i><span>箱体突破确认</span><b>待验证</b></li></ul>
+        <p class="principle">系统按长期期望值与回撤质量评估，不为提高胜率放宽入场标准。</p>
+      </aside>
+    </section>
+
+    <section id="signals" class="panel section-panel">
+      <header><div><p class="panel-kicker">ACTIONABLE SETUPS</p><h2>当前交易信号</h2></div><div class="grade-key"><span class="grade a">A</span>共振确认 <span class="grade b">B</span>结构成立 <span class="grade c">C</span>观察预警</div></header>
+      <div class="table-wrap"><table><thead><tr><th>等级 / 合约</th><th>方向</th><th>策略</th><th>入场</th><th>止损</th><th>止盈</th><th>盈亏比</th><th>风险距离</th></tr></thead><tbody id="signalsBody"><tr><td colspan="8" class="empty">正在读取当前信号…</td></tr></tbody></table></div>
+    </section>
+
+    <section class="two-col">
+      <article id="positions" class="panel section-panel"><header><div><p class="panel-kicker">PAPER POSITIONS</p><h2>纸面仓位 / 观察列表</h2></div><span id="positionBadge" class="counter">0</span></header><div id="positionList" class="position-list"><p class="empty">正在读取…</p></div></article>
+      <article class="panel section-panel"><header><div><p class="panel-kicker">DELIVERY</p><h2>Telegram 推送</h2></div><span id="telegramBadge" class="off-badge">关闭</span></header><div class="delivery-card"><div class="telegram-icon">✈</div><div><strong id="telegramStatus">未启用外部推送</strong><p id="telegramPolicy">只有明确、可执行且参数完整的机会才推送。</p></div></div><div class="quiet-note"><span>静默原则</span><p>没有合格机会时不发送状态、报错、占位或重复消息。</p></div></article>
+    </section>
+
+    <section id="modules" class="panel section-panel modules"><header><div><p class="panel-kicker">MODULAR PIPELINE</p><h2>策略与风险模块</h2></div><p>接口先行，后续新增策略无需重写控制台</p></header><div id="moduleGrid" class="module-grid"></div></section>
+  </main>
+  <footer class="page-footer"><span>本地只读 · 纸面研究 · 不连接账户 · 不自动下单</span><span id="sourceLabel">DATA ADAPTER V1</span></footer>
+  <script src="/app.js"></script>
+</body>
+</html>

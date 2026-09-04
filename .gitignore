@@ -19,3 +19,4 @@ outputs/*.csv
 outputs/*.json
 outputs/*.jsonl
 outputs/*.partial
+web/__pycache__/

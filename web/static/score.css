@@ -88,4 +88,5 @@
 }
 
 .live-price { color: var(--mint); font-weight: 700; }
+.dynamic-stop { color: var(--amber); font-weight: 800; }
 .sub-price { display: block; margin-top: 3px; color: var(--muted); font-size: 10px; white-space: nowrap; }

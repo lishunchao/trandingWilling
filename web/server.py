@@ -6,6 +6,8 @@ import mimetypes
 import urllib.error
 import urllib.parse
 import urllib.request
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -36,6 +38,8 @@ class AppHandler(BaseHTTPRequestHandler):
             return self._candles(urllib.parse.parse_qs(url.query))
         if url.path == "/api/v1/marks":
             return self._marks(urllib.parse.parse_qs(url.query))
+        if url.path == "/api/v1/dynamic-stops":
+            return self._dynamic_stops()
         if url.path == "/api/v1/health":
             return self._json({"ok": True, "service": "qingyun-web-v1"})
         path = "index.html" if url.path in ("", "/") else url.path.lstrip("/")
@@ -83,6 +87,58 @@ class AppHandler(BaseHTTPRequestHandler):
             return self._json({"source": "binance_usdt_perpetual_mark_price", "marks": marks})
         except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
             return self._json({"error": "mark prices temporarily unavailable", "detail": str(exc)}, 502)
+
+    @staticmethod
+    def _dynamic_stop(item):
+        symbol = item["symbol"]
+        endpoint = "https://fapi.binance.com/fapi/v1/klines?" + urllib.parse.urlencode(
+            {"symbol": symbol, "interval": "15m", "limit": 40}
+        )
+        request = urllib.request.Request(endpoint, headers={"User-Agent": "Trading-Console-V1/1.0"})
+        with urllib.request.urlopen(request, timeout=8) as response:
+            rows = json.loads(response.read().decode("utf-8"))
+        now_ms = int(time.time() * 1000)
+        bars = [{"h": float(r[2]), "l": float(r[3]), "c": float(r[4])} for r in rows if int(r[6]) < now_ms]
+        if len(bars) < 20:
+            raise ValueError("insufficient completed candles")
+        true_ranges = []
+        for index in range(1, len(bars)):
+            bar, previous = bars[index], bars[index - 1]
+            true_ranges.append(max(bar["h"] - bar["l"], abs(bar["h"] - previous["c"]), abs(bar["l"] - previous["c"])))
+        atr = sum(true_ranges[-14:]) / 14
+        original = float(item["stop"])
+        recent = bars[-5:]
+        if item["side"] == "做多":
+            candidate = min(x["l"] for x in recent) - atr * 0.4
+            dynamic = max(original, candidate)
+        else:
+            candidate = max(x["h"] for x in recent) + atr * 0.4
+            dynamic = min(original, candidate)
+        return {
+            "key": f'{item.get("strategy")}:{symbol}:{item.get("side")}',
+            "symbol": symbol,
+            "stop": dynamic,
+            "original_stop": original,
+            "atr": atr,
+            "changed": abs(dynamic - original) > max(abs(original) * 1e-10, 1e-12),
+        }
+
+    def _dynamic_stops(self):
+        snapshot = ADAPTER.snapshot()
+        unique = {}
+        for item in snapshot["signals"] + snapshot["positions"]:
+            key = f'{item.get("strategy")}:{item.get("symbol")}:{item.get("side")}'
+            unique[key] = item
+        results, errors = {}, 0
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(self._dynamic_stop, item): key for key, item in unique.items()}
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                    results[result["key"]] = result
+                except Exception:
+                    errors += 1
+        return self._json({"basis": "completed_15m_structure_plus_0.4_atr", "stops": results, "errors": errors})
 
     def log_message(self, fmt, *args):
         print("[web]", fmt % args)

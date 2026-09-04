@@ -36,12 +36,12 @@ function renderDashboard(data) {
 }
 
 function renderSignals(signals) {
-  $("signalsBody").innerHTML = signals.length ? signals.map(s => `<tr><td><div class="symbol-cell"><span class="grade ${s.grade.toLowerCase()}">${s.grade}</span>${s.symbol}</div></td><td class="${s.side === "做多" ? "long" : "short"}">${s.side}</td><td>${s.strategy === "enhanced" ? "增强版" : "基准版"}</td><td>${price(s.entry)}</td><td>${price(s.stop)}</td><td>${price(s.target)}</td><td class="rr">${s.reward_risk || "—"}R</td><td>${s.risk_pct == null ? "—" : (s.risk_pct * 100).toFixed(2) + "%"}</td></tr>`).join("") : `<tr><td colspan="8" class="empty">当前没有新信号。系统保持静默，不构造机会。</td></tr>`;
+  $("signalsBody").innerHTML = signals.length ? signals.map(s => { const p=s.score_parts; const tip=`确认 ${p.confirmation}/30 · 盈亏比 ${p.reward_risk}/30 · 风控 ${p.risk_control}/30 · 成本 ${p.cost_integrity}/10`; return `<tr><td><div class="symbol-cell"><span class="grade ${s.grade.toLowerCase()}">${s.grade}</span>${s.symbol}</div></td><td><div class="score" title="${tip}"><strong>${s.score}</strong><span><i style="width:${s.score}%"></i></span></div></td><td class="${s.side === "做多" ? "long" : "short"}">${s.side}</td><td>${s.strategy === "enhanced" ? "增强版" : "基准版"}</td><td>${price(s.entry)}</td><td>${price(s.stop)}</td><td>${price(s.target)}</td><td class="rr">${s.reward_risk || "—"}R</td><td>${s.risk_pct == null ? "—" : (s.risk_pct * 100).toFixed(2) + "%"}</td></tr>`}).join("") : `<tr><td colspan="9" class="empty">当前没有新信号。系统保持静默，不构造机会。</td></tr>`;
 }
 
 function renderPositions(positions) {
   $("positionBadge").textContent = positions.length;
-  $("positionList").innerHTML = positions.length ? positions.slice(0, 16).map(p => `<div class="position-row"><div><strong>${p.symbol}</strong><small>${p.strategy === "enhanced" ? "增强版" : "基准版"} · ${p.grade}级</small></div><div class="${p.side === "做多" ? "long" : "short"}">${p.side}<small>${p.reward_risk || "—"}R</small></div><div><span class="price-path">入场 → 止损</span><small>${price(p.entry)} → ${price(p.stop)}</small></div><div><span class="price-path">目标</span><small>${price(p.target)}</small></div></div>`).join("") : `<p class="empty">当前没有纸面仓位。</p>`;
+  $("positionList").innerHTML = positions.length ? positions.slice(0, 16).map(p => `<div class="position-row"><div><strong>${p.symbol}</strong><small>${p.strategy === "enhanced" ? "增强版" : "基准版"} · ${p.grade}级 · ${p.score}分</small></div><div class="${p.side === "做多" ? "long" : "short"}">${p.side}<small>${p.reward_risk || "—"}R</small></div><div><span class="price-path">入场 → 止损</span><small>${price(p.entry)} → ${price(p.stop)}</small></div><div><span class="price-path">目标</span><small>${price(p.target)}</small></div></div>`).join("") : `<p class="empty">当前没有纸面仓位。</p>`;
 }
 
 function renderTelegram(tg) {

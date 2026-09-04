@@ -31,20 +31,40 @@ class TrackerAdapter:
             return None
 
     @staticmethod
-    def _grade(item: dict) -> str:
+    def _score(item: dict, cost_model: str | None = None) -> tuple[int, dict]:
         rr = TrackerAdapter._rr(item) or 0
         risk = float(item.get("risk_pct") or 0)
-        if item.get("strategy") == "enhanced" and rr >= 2 and risk <= 0.03:
+        confirmation = 30 if item.get("strategy") == "enhanced" else 18
+        reward_risk = round(min(30, max(0, rr / 3 * 30)))
+        if risk <= 0.015:
+            risk_control = 30
+        elif risk <= 0.03:
+            risk_control = 24
+        elif risk <= 0.06:
+            risk_control = 16
+        elif risk <= 0.10:
+            risk_control = 8
+        else:
+            risk_control = 2
+        cost_integrity = 10 if cost_model and cost_model != "unknown" else 0
+        parts = {"confirmation": confirmation, "reward_risk": reward_risk,
+                 "risk_control": risk_control, "cost_integrity": cost_integrity}
+        return min(100, sum(parts.values())), parts
+
+    @staticmethod
+    def _grade(score: int) -> str:
+        if score >= 85:
             return "A"
-        if rr >= 2 and risk <= 0.06:
+        if score >= 70:
             return "B"
         return "C"
 
     def snapshot(self) -> dict:
         raw = self._read_json(self.status_path, {})
         config = self._read_json(self.config_path, {})
-        positions = [self._decorate(x) for x in raw.get("positions", [])]
-        signals = [self._decorate(x) for x in raw.get("new_signals", [])]
+        cost_model = raw.get("cost_model", "unknown")
+        positions = [self._decorate(x, cost_model) for x in raw.get("positions", [])]
+        signals = [self._decorate(x, cost_model) for x in raw.get("new_signals", [])]
         trades = raw.get("trades", [])
         closed = [x for x in trades if x.get("net_r") is not None]
         wins = [x for x in closed if float(x.get("net_r", 0)) > 0]
@@ -90,8 +110,9 @@ class TrackerAdapter:
             ],
         }
 
-    def _decorate(self, item: dict) -> dict:
+    def _decorate(self, item: dict, cost_model: str | None = None) -> dict:
         out = dict(item)
         out["reward_risk"] = self._rr(item)
-        out["grade"] = self._grade(item)
+        out["score"], out["score_parts"] = self._score(item, cost_model)
+        out["grade"] = self._grade(out["score"])
         return out

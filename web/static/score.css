@@ -1,0 +1,28 @@
+.score {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 82px;
+}
+
+.score strong {
+  color: var(--text);
+  font-size: 14px;
+  width: 22px;
+}
+
+.score > span {
+  display: block;
+  width: 44px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 4px;
+  background: #243831;
+}
+
+.score i {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--blue), var(--mint));
+}

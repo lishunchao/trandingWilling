@@ -7,4 +7,4 @@ $Python = if (Test-Path -LiteralPath $BundledPython) { $BundledPython } else { '
 $VenvPython = Join-Path $ProjectRoot '.venv\Scripts\python.exe'
 & $VenvPython -m pip install --disable-pip-version-check -r (Join-Path $ProjectRoot 'requirements.txt')
 & $VenvPython -m compileall -q (Join-Path $ProjectRoot 'work')
-Write-Host '环境已就绪。运行 .\test.ps1 验证，运行 .\start.ps1 -Once 执行一次公开行情扫描。'
+Write-Host 'Setup complete. Run .\test.ps1 to verify, .\start.ps1 -Once to scan, or .\start_web.ps1 for Web V1.'

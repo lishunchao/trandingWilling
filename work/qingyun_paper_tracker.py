@@ -16,14 +16,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "outputs"
-WORK = ROOT / "runtime"
+WORK = ROOT / "work"
 STATE_PATH = WORK / "paper_tracker_state.json"
 LOG_PATH = WORK / "paper_tracker.log"
 STATUS_PATH = OUT / "paper_tracker_status.json"
-SOURCE = ROOT / "binance_qingyun_scanner.py"
-SETTINGS_PATH = SOURCE.with_name("trading_scanner_config.json")
+SOURCE = WORK / "binance_qingyun_scanner.py"
+SETTINGS_PATH = ROOT / "config" / "trading_scanner_config.json"
 FUNDING_PROXY = 0.0001
 COST_MODEL_ID = "taker5bps_slippage2bps_each_side_funding1bp"
 

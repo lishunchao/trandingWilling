@@ -1,83 +1,58 @@
-# 青云交易研究与信号系统
+# 青云交易研究与本地纸面跟踪系统
 
-这是我们此前整理的青云/EMA 交易研究代码。项目只读取公开行情，用于信号扫描、纸面跟踪和历史回测；**不包含下单、账户、划转或资金操作代码**。
+这是一个只读取 Binance USDT 永续合约公开行情的研究与纸面跟踪项目。它不会连接交易账户，不读取 API Key，不会下单、转账或提现；默认也不会向 Telegram、Bark 或其他外部渠道推送。
 
-> 风险提示：任何信号和回测结果都不构成投资建议。历史或模拟结果不代表未来表现。默认关闭 Telegram/Bark 推送。
+仓库还保留历史回测工具和 TradingView Pine 独立复刻版，便于复现研究与人工核对。
 
-## 主要文件
+## Windows 本地安装
 
-- `binance_qingyun_scanner.py`：Binance USDT 永续合约只读扫描器，4 小时判断方向、15 分钟确认机会。
-- `qingyun_paper_tracker.py`：基准版与增强版的本地纸面跟踪，不接交易账户。
-- `qingyun_parallel_backtest.py`：基于 Binance Vision 公共历史数据的回测与对比工具。
-- `青云操作系统v2.1_独立复刻版.pine`：TradingView Pine 独立复刻版。
-- `trading_scanner_config.json`：可公开的策略与运行参数。
-- `config.example.json` / `bark_private_config.example.json`：通知配置模板。
-- `test_paper_tracker_costs.py`：成本迁移逻辑的确定性测试。
-
-## 环境要求
-
-- Windows、macOS 或 Linux
-- Python 3.10+
-- 扫描器与纸面跟踪仅使用 Python 标准库
-- 历史回测额外需要 NumPy
-
-安装回测依赖：
+系统要求：Windows 10/11、PowerShell。项目优先复用 Codex 自带的 Python；若不存在，则使用系统 `python`。
 
 ```powershell
-python -m pip install -r requirements.txt
+Set-ExecutionPolicy -Scope Process Bypass
+.\setup.ps1
+.\test.ps1
 ```
+
+纸面跟踪仅使用 Python 标准库；运行 `work/qingyun_parallel_backtest.py` 时需要 `requirements.txt` 中的 NumPy。虚拟环境会创建在 `.venv` 中，以便隔离和复现。
+
+## 运行
+
+执行一次真实公开行情扫描：
+
+```powershell
+.\start.ps1 -Once
+```
+
+持续运行，每根 15 分钟 K 线收盘后约一分钟扫描：
+
+```powershell
+.\start.ps1
+```
+
+按 `Ctrl+C` 停止。运行状态写入 `outputs/paper_tracker_status.json`，日志写入 `work/paper_tracker.log`，本地纸面仓位与历史写入 `work/paper_tracker_state.json`。这些运行数据不会提交到 Git。
+
+历史回测参数：
+
+```powershell
+.\.venv\Scripts\python.exe .\work\qingyun_parallel_backtest.py --help
+```
+
+TradingView 脚本位于 `tradingview/青云操作系统v2.1_独立复刻版.pine`。它是独立复刻与研究版本，上线前仍应在 TradingView 中完成编译、回放与原版信号对照。
 
 ## 配置
 
-1. 复制 `config.example.json` 为 `config.json`。
-2. 如需 Telegram，在本地 `config.json` 填写 Bot Token 和 Chat ID，并将 `trading_scanner_config.json` 的 `telegram_enabled` 改为 `true`。
-3. 如需 Bark，复制 `bark_private_config.example.json` 为 `bark_private_config.json`，填写私有推送地址，并将 `bark_enabled` 改为 `true`。
+策略参数位于 `config/trading_scanner_config.json`。默认只使用公开市场数据，通知开关固定关闭。`.env.example` 只是安全边界说明，不需要填写任何密钥。
 
-`config.json`、`bark_private_config.json`、日志、状态、缓存和回测大文件已由 `.gitignore` 排除。不要把真实 Token、私钥或密码写进示例文件。
+## 安全边界
 
-## 使用
+- 只做研究和虚拟成交记录，不构成交易建议。
+- 没有自动下单、账户、资金划转或提现代码。
+- 不要把真实 API Key、Telegram Bot Token、密码、私钥或私密推送地址写入仓库。
+- 历史与纸面结果不能代表未来收益；正式使用前仍需独立复核交易逻辑、手续费、滑点和风控。
 
-先执行一次无推送扫描：
+## 常见问题
 
-```powershell
-python binance_qingyun_scanner.py --once --dry-run
-```
-
-持续扫描（是否推送由配置控制）：
-
-```powershell
-python binance_qingyun_scanner.py
-```
-
-执行一次纸面跟踪：
-
-```powershell
-python qingyun_paper_tracker.py --once
-```
-
-查看回测参数：
-
-```powershell
-python qingyun_parallel_backtest.py --help
-```
-
-运行测试：
-
-```powershell
-python test_paper_tracker_costs.py
-```
-
-## 数据与输出
-
-- `runtime/`：状态、日志和行情缓存，仅保留在本机。
-- `outputs/`：回测和纸面跟踪结果，默认不提交。
-- 历史行情来自 Binance Vision 公共数据；实时扫描使用 Binance 公共市场接口。
-
-纸面跟踪采用固定研究成本假设：单边 0.05% taker 手续费、单边 0.02% 滑点，并附加 0.01% 资金费代理值。完整假设与参数以代码和输出报告为准。
-
-## 故障排查
-
-- 提示缺少 `config.json`：从 `config.example.json` 复制一份；只做 dry-run 也需要该文件存在。
-- Binance 返回 451/429：通常是地区访问限制或频率限制，请降低并发/频率并遵守当地规定和接口条款。
-- 回测首次运行较慢：程序需要下载并缓存历史压缩数据，后续会复用 `runtime/binance_vision_cache/`。
-- Windows 上 `python` 不可用：尝试已安装解释器的完整路径，或安装 Python 3.10 以上版本。
+- 提示找不到 Python：安装 Python 3.11 或更新版本，并确保 `python` 可用，然后重新运行 `setup.ps1`。
+- Binance 接口超时或受地区网络限制：稍后重试；程序会尝试公开备用域名，但不会绕过网络政策。
+- 首次扫描较慢：需要为合约列表下载 1 小时与 15 分钟 K 线；后续会复用本地状态。

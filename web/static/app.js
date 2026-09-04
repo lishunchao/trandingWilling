@@ -2,6 +2,8 @@ const $ = (id) => document.getElementById(id);
 const fmt = (n) => n == null ? "—" : Number(n).toLocaleString("zh-CN", {maximumSignificantDigits: 7});
 const price = (n) => n == null ? "—" : Number(n).toLocaleString("en-US", {maximumSignificantDigits: 7});
 let interval = "15m";
+let strategyFilter = "enhanced";
+let latestDashboard = null;
 
 async function getJSON(url) {
   const response = await fetch(url, {cache: "no-store"});
@@ -17,6 +19,7 @@ function ageText(seconds) {
 }
 
 function renderDashboard(data) {
+  latestDashboard = data;
   const sys = data.system, metrics = data.metrics;
   $("statusDot").className = sys.status === "running" ? "online" : "stale";
   $("systemStatus").textContent = sys.status === "running" ? "策略运行中" : sys.status === "stale" ? "数据待刷新" : "等待首次扫描";
@@ -28,11 +31,24 @@ function renderDashboard(data) {
   $("expectancy").textContent = metrics.expectancy_r == null ? "待积累" : `${metrics.expectancy_r > 0 ? "+" : ""}${metrics.expectancy_r}R`;
   $("sampleSize").textContent = `扣除成本 · ${metrics.closed_trades} 笔历史样本`;
   $("winRate").textContent = metrics.win_rate == null ? "待积累" : `${metrics.win_rate}%`;
-  renderSignals(data.signals);
-  renderPositions(data.positions);
+  renderStrategyViews();
   renderTelegram(data.telegram);
   renderModules(data.modules);
   $("sourceLabel").textContent = `SOURCE · ${data.source}`;
+}
+
+function renderStrategyViews() {
+  if (!latestDashboard) return;
+  const signals = latestDashboard.signals;
+  const positions = latestDashboard.positions;
+  const filteredSignals = strategyFilter === "all" ? signals : signals.filter(x => x.strategy === strategyFilter);
+  const filteredPositions = strategyFilter === "all" ? positions : positions.filter(x => x.strategy === strategyFilter);
+  $("enhancedCount").textContent = signals.filter(x => x.strategy === "enhanced").length;
+  $("baselineCount").textContent = signals.filter(x => x.strategy === "baseline").length;
+  $("allCount").textContent = signals.length;
+  $("positionFilterLabel").textContent = strategyFilter === "enhanced" ? "增强版" : strategyFilter === "baseline" ? "基准版" : "全部版本";
+  renderSignals(filteredSignals);
+  renderPositions(filteredPositions);
 }
 
 function renderSignals(signals) {
@@ -80,6 +96,7 @@ async function loadCandles() {
 }
 
 document.querySelectorAll("[data-scroll]").forEach(b=>b.addEventListener("click",()=>$(b.dataset.scroll).scrollIntoView({behavior:"smooth"})));
+document.querySelectorAll("[data-strategy]").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll("[data-strategy]").forEach(x=>x.classList.remove("active"));b.classList.add("active");strategyFilter=b.dataset.strategy;renderStrategyViews()}));
 document.querySelectorAll(".intervals button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".intervals button").forEach(x=>x.classList.remove("active"));b.classList.add("active");interval=b.textContent;loadCandles()}));
 $("symbolPicker").addEventListener("change",loadCandles);
 addEventListener("resize",()=>loadCandles());
